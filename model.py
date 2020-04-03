@@ -16,31 +16,37 @@ epochs = 4
 batch_size = 64
 steering_correction = [0.0, 0.2, -0.2]
 
-def read_csv(file_path):
+def read_csv():
+    os.chdir('/home/workspace/CarND-Behavioral-Cloning-P3/data_samples')
     lines = []
-    with open(file_path + '/driving_log.csv') as csv_file:
-        reader = csv.reader(csv_file)
-        for line in reader:
-            lines.append(line)
+    for sub_dir in  next(os.walk('.'))[1]:
+        with open(sub_dir + '/driving_log.csv') as csv_file:
+            reader = csv.reader(csv_file)
+            for line in reader:
+                lines.append(line)
     return lines
 
-def read_data():
-    os.chdir('/home/workspace/CarND-Behavioral-Cloning-P3/data_samples')
-    for sub_dir in  next(os.walk('.'))[1]:
-        lines = read_csv(sub_dir)
-        images = []
-        steering_values = []
-        for line in lines[1:]:
-            steering = float(line[3])
-            for i in range(3):
-                image = cv2.imread(line[i].strip())
-                rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                images.append(rgb_image)
-                steering_values.append(steering + steering_correction[i])
-                images.append(cv2.flip(image,1))
-                steering_values.append((steering + steering_correction[i]) * -1.0)
-
-    return sklearn.utils.shuffle(np.array(images), np.array(steering_values))
+def generator(data, batch_size):
+    data_length = len(data)
+    while 1: # Loop forever so the generator never terminates
+        sklearn.utils.shuffle(data)
+        for offset in range(0, data_length, batch_size):
+            batch_data = data[offset:offset+batch_size]
+            images = []
+            steering_values = []
+            for batch_sample in batch_data:
+                steering = float(batch_sample[3])
+                for i in range(3):
+                    image = cv2.imread(batch_sample[i].strip())
+                    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                    images.append(rgb_image)
+                    steering_values.append(steering + steering_correction[i])
+                    images.append(cv2.flip(image,1))
+                    steering_values.append((steering + steering_correction[i]) * -1.0)
+            
+            X_train = np.array(images)
+            y_train = np.array(steering_values)
+            yield sklearn.utils.shuffle(X_train, y_train)
 
 
 def create_model():
@@ -59,16 +65,15 @@ def create_model():
     model.add(Dense(1))
     return model
 
-def trainAndSave(model, inputs, outputs, modelFile, epochs = 3):
-    model.compile(loss='mse', optimizer='adam')
-    model.fit(inputs, outputs, validation_split=0.2, shuffle=True, nb_epoch=epochs)
-    model.save(modelFile)
-
 if __name__ == '__main__':
+    lines = read_csv()
+    X_train, X_valid = train_test_split(lines, test_size=0.2)
+
+    train_generator = generator(X_train, batch_size)
+    valid_generator = generator(X_valid, batch_size)
     model = create_model()
-    X_train, y_train = read_data()
-    X_valid, y_valid = read_data()
+
     model.compile(loss='mse', optimizer='adam')
     # model.fit(X_train, y_train, validation_split=0.2, shuffle=True, nb_epoch = epochs)
-    model.fit_generator((X_train, y_train), steps_per_epoch = np.ceil(len(X_train)/batch_size), validation_data = (X_valid, y_valid), validation_steps = np.ceil(len(X_train)/batch_size),epochs = epochs, verbose = 1 )
+    model.fit_generator(train_generator, steps_per_epoch = np.ceil(len(X_train)/batch_size), validation_data = valid_generator, validation_steps = np.ceil(len(X_valid)/batch_size),epochs = epochs, verbose = 1 )
     model.save("../model2.h5")
